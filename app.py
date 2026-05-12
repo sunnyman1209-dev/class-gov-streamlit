@@ -1,3 +1,5 @@
+from urllib.parse import urlparse
+
 import os
 
 import streamlit as st
@@ -28,6 +30,16 @@ DEFAULT_DEPTS = [
 def _normalize_secret(value: object) -> str:
     s = str(value).strip()
     s = s.replace("\ufeff", "").replace("\u200b", "").replace("\u200c", "")
+    for bad, good in (
+        ("\u201c", '"'),
+        ("\u201d", '"'),
+        ("\u2018", "'"),
+        ("\u2019", "'"),
+        ("\uff1a", ":"),
+    ):
+        s = s.replace(bad, good)
+    if len(s) >= 2 and s[0] == s[-1] and s[0] in "\"'":
+        s = s[1:-1].strip()
     return s
 
 
@@ -53,16 +65,26 @@ def _require_ascii_http(value: str, label: str) -> str:
     return value
 
 
+def _validate_supabase_url(url: str) -> str:
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or not parsed.netloc:
+        st.error("`SUPABASE_URL`은 `https://`로 시작하는 전체 주소여야 합니다.")
+        st.stop()
+    return url
+
+
 @st.cache_resource
 def get_supabase() -> Client:
-    url = _require_ascii_http(
-        _normalize_secret(_resolve_secret("SUPABASE_URL")), "SUPABASE_URL"
-    ).rstrip("/")
+    url = _validate_supabase_url(
+        _require_ascii_http(
+            _normalize_secret(_resolve_secret("SUPABASE_URL")), "SUPABASE_URL"
+        ).rstrip("/")
+    )
     key = _require_ascii_http(
         _normalize_secret(_resolve_secret("SUPABASE_SERVICE_ROLE_KEY")),
         "SUPABASE_SERVICE_ROLE_KEY",
     )
-    return create_client(url, key)
+    return create_client(str(url), str(key))
 
 
 def _rows_to_config_df(rows: list[dict]) -> pd.DataFrame:
@@ -187,7 +209,23 @@ def _secrets_configured() -> bool:
 _secrets_ok = _secrets_configured()
 
 if _secrets_ok and "config" not in st.session_state:
-    st.session_state.config, st.session_state.requests = load_data()
+    try:
+        st.session_state.config, st.session_state.requests = load_data()
+    except UnicodeEncodeError:
+        st.session_state.pop("config", None)
+        st.session_state.pop("requests", None)
+        st.error(
+            "HTTP 요청 인코딩 오류입니다. Secrets의 URL·키에 한글·스마트따옴표·"
+            "보이지 않는 문자가 섞였을 수 있습니다. 메모장에 붙였다가 다시 복사하거나, "
+            "Streamlit 앱 설정에서 Python 버전을 3.12로 낮춘 뒤 새부팅해 보세요."
+        )
+        st.stop()
+    except Exception as exc:
+        st.session_state.pop("config", None)
+        st.session_state.pop("requests", None)
+        st.error("Supabase에서 데이터를 불러오지 못했습니다.")
+        st.caption(repr(exc))
+        st.stop()
 
 st.markdown(
     """
