@@ -23,12 +23,34 @@ DEFAULT_DEPTS = [
 ]
 
 
+def _normalize_secret(value: object) -> str:
+    s = str(value).strip()
+    s = s.replace("\ufeff", "").replace("\u200b", "").replace("\u200c", "")
+    return s
+
+
+def _require_ascii_http(value: str, label: str) -> str:
+    try:
+        value.encode("ascii")
+    except UnicodeEncodeError:
+        st.error(
+            f"`{label}` 값에 HTTP 헤더로 쓸 수 없는 문자(한글, 특수 따옴표, 보이지 않는 문자 등)가 "
+            "포함된 것 같습니다. Supabase에서 키를 다시 복사하거나, 앞뒤 설명·따옴표·주석을 제거해 주세요."
+        )
+        st.stop()
+    return value
+
+
 @st.cache_resource
 def get_supabase() -> Client:
-    return create_client(
-        st.secrets["SUPABASE_URL"],
-        st.secrets["SUPABASE_SERVICE_ROLE_KEY"],
+    url = _require_ascii_http(
+        _normalize_secret(st.secrets["SUPABASE_URL"]), "SUPABASE_URL"
+    ).rstrip("/")
+    key = _require_ascii_http(
+        _normalize_secret(st.secrets["SUPABASE_SERVICE_ROLE_KEY"]),
+        "SUPABASE_SERVICE_ROLE_KEY",
     )
+    return create_client(url, key)
 
 
 def _rows_to_config_df(rows: list[dict]) -> pd.DataFrame:
