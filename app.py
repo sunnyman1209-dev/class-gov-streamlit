@@ -1,3 +1,5 @@
+import os
+
 import streamlit as st
 import pandas as pd
 from datetime import datetime
@@ -29,6 +31,16 @@ def _normalize_secret(value: object) -> str:
     return s
 
 
+def _resolve_secret(name: str) -> str:
+    try:
+        v = st.secrets[name]
+        if v is not None and str(v).strip():
+            return str(v)
+    except (KeyError, FileNotFoundError, TypeError):
+        pass
+    return (os.environ.get(name) or "").strip()
+
+
 def _require_ascii_http(value: str, label: str) -> str:
     try:
         value.encode("ascii")
@@ -44,10 +56,10 @@ def _require_ascii_http(value: str, label: str) -> str:
 @st.cache_resource
 def get_supabase() -> Client:
     url = _require_ascii_http(
-        _normalize_secret(st.secrets["SUPABASE_URL"]), "SUPABASE_URL"
+        _normalize_secret(_resolve_secret("SUPABASE_URL")), "SUPABASE_URL"
     ).rstrip("/")
     key = _require_ascii_http(
-        _normalize_secret(st.secrets["SUPABASE_SERVICE_ROLE_KEY"]),
+        _normalize_secret(_resolve_secret("SUPABASE_SERVICE_ROLE_KEY")),
         "SUPABASE_SERVICE_ROLE_KEY",
     )
     return create_client(url, key)
@@ -167,12 +179,9 @@ def save_data(
 
 
 def _secrets_configured() -> bool:
-    try:
-        return bool(st.secrets["SUPABASE_URL"]) and bool(
-            st.secrets["SUPABASE_SERVICE_ROLE_KEY"]
-        )
-    except (KeyError, FileNotFoundError, TypeError):
-        return False
+    u = _normalize_secret(_resolve_secret("SUPABASE_URL"))
+    k = _normalize_secret(_resolve_secret("SUPABASE_SERVICE_ROLE_KEY"))
+    return bool(u) and bool(k)
 
 
 _secrets_ok = _secrets_configured()
@@ -201,9 +210,9 @@ st.title("🛡️ 학급 정부 시스템")
 
 if not _secrets_ok:
     st.error(
-        "Supabase 연결 정보가 없습니다. 로컬은 `.streamlit/secrets.toml`, "
-        "Streamlit Cloud는 Settings → Secrets에 `SUPABASE_URL`과 "
-        "`SUPABASE_SERVICE_ROLE_KEY`를 설정하세요."
+        "Supabase 연결 정보가 없습니다. "
+        "동일한 이름의 키를 Streamlit Secrets, 로컬 `.streamlit/secrets.toml`, "
+        "또는 환경 변수에 넣어 주세요."
     )
     st.stop()
 
